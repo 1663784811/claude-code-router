@@ -5,7 +5,7 @@ import traceback
 
 from handlers.util.OpenaiToAnthropic import openai_stream_to_anthropic, openai_to_anthropic
 from handlers.util.AnthropicToOpenai import anthropic_to_openai_request
-from handlers.util.ErrorMap import map_openai_exception
+from handlers.util.ErrorMap import anthropic_error, map_openai_exception
 
 client = AsyncOpenAI(
     base_url="https://integrate.api.nvidia.com/v1",
@@ -19,7 +19,11 @@ async def handle_messages(request: Request):
     print('--------------- 处理： /v1/messages ---------------')
     anthropic_body = await request.json()
 
-    openai_body = anthropic_to_openai_request(anthropic_body)
+    try:
+        openai_body = anthropic_to_openai_request(anthropic_body)
+    except ValueError as e:
+        return anthropic_error(400, "invalid_request_error", str(e))
+
     model = openai_body["model"]
     messages = openai_body["messages"]
 
@@ -36,6 +40,9 @@ async def handle_messages(request: Request):
                 model=model,
                 messages=messages,
                 stream=True,
+                # 不显式要求的话，多数 OpenAI 兼容上游不会在流里返回 usage，
+                # 结果是 message_delta 的 token 统计恒为 0
+                stream_options={"include_usage": True},
                 **extra_kwargs,
             )
             return StreamingResponse(

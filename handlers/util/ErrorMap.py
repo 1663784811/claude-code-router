@@ -15,6 +15,10 @@ from openai import (
 )
 
 
+class UpstreamResponseError(Exception):
+    """上游返回了结构不合法的响应（例如 choices 为空）"""
+
+
 def anthropic_error(status_code: int, err_type: str, message: str) -> JSONResponse:
     """构造一个 Anthropic 格式的错误响应"""
     return JSONResponse(
@@ -25,6 +29,8 @@ def anthropic_error(status_code: int, err_type: str, message: str) -> JSONRespon
 
 def map_openai_exception(e: Exception) -> JSONResponse:
     """把上游 OpenAI SDK 异常映射成 Anthropic 格式的错误响应"""
+    if isinstance(e, UpstreamResponseError):
+        return anthropic_error(502, "api_error", f"上游响应异常: {e}")
     if isinstance(e, RateLimitError):
         return anthropic_error(429, "rate_limit_error", f"上游限流(rpm exhausted): {e}")
     if isinstance(e, AuthenticationError):

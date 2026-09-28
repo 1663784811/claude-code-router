@@ -13,6 +13,8 @@
 import json
 import uuid
 
+from handlers.util.ErrorMap import UpstreamResponseError
+
 
 def _sse(event: str, data: dict) -> bytes:
     """构造一条 Anthropic SSE 消息"""
@@ -46,8 +48,6 @@ async def openai_stream_to_anthropic(stream, model_name: str):
     text_block_open = False
     # openai tool_call.index -> anthropic block index
     tool_block_index: dict = {}
-    # openai tool_call.index -> 累积的 arguments 字符串
-    tool_args_buf: dict = {}
     # openai tool_call.index -> {"id":..., "name":...}
     tool_meta: dict = {}
 
@@ -109,7 +109,6 @@ async def openai_stream_to_anthropic(stream, model_name: str):
                             "id": getattr(tc, "id", None) or f"toolu_{uuid.uuid4().hex[:24]}",
                             "name": getattr(fn, "name", "") if fn else "",
                         }
-                        tool_args_buf[idx] = ""
                         tool_block_index[idx] = block_index
 
                         yield _sse("content_block_start", {
@@ -128,7 +127,6 @@ async def openai_stream_to_anthropic(stream, model_name: str):
                     fn = getattr(tc, "function", None)
                     args_piece = getattr(fn, "arguments", None) if fn else None
                     if args_piece:
-                        tool_args_buf[idx] += args_piece
                         yield _sse("content_block_delta", {
                             "type": "content_block_delta",
                             "index": tool_block_index[idx],
@@ -197,7 +195,11 @@ async def openai_stream_to_anthropic(stream, model_name: str):
 # ============================================================
 def openai_to_anthropic(resp, model_name: str) -> dict:
     """把 OpenAI ChatCompletion 转成 Anthropic Message"""
-    choice = resp.choices[0]
+    choices = getattr(resp, "choices", None) or []
+    if not choices:
+        # 上游返回了不合法的响应体，交给上层映射成 502
+        raise UpstreamResponseError("上游未返回任何 choices")
+    choice = choices[0]
     msg = choice.message
     content_blocks = []
 

@@ -1,49 +1,87 @@
 """
 把 Anthropic Messages API 的请求体转换为 OpenAI Chat Completions 请求体
+
+- text / image / tool_use / tool_result 都会转换
+- image 转成 OpenAI 多模态 image_url（纯文本消息仍是 str，含图才用 list）
+- thinking / redacted_thinking 直接丢弃，不回传上游
+- model 为必填，缺失时抛 ValueError（由调用方转成 400）
 """
 import json
 from typing import Any, Dict, List, Tuple
 
 
-def _content_to_openai(content: Any) -> Tuple[str, List[Dict], List[Dict]]:
+def _parts_to_text(parts: List[Dict]) -> str:
+    """只取文本部分的拼接结果（用于 system / tool_result 这类纯文本场景）"""
+    return "\n".join(
+        p["text"] for p in parts if p.get("type") == "text" and p.get("text")
+    )
+
+
+def _parts_to_content(parts: List[Dict]) -> Any:
     """
-    把 Anthropic 的 content 转成 OpenAI 的 (text, tool_calls, tool_results)
+    把 content parts 收敛成 OpenAI 的 content 字段：
+    - 全是文本 -> str（兼容只认纯文本的上游）
+    - 含图片   -> list[part]（OpenAI 多模态格式）
+    """
+    if not parts:
+        return ""
+    if all(p.get("type") == "text" for p in parts):
+        return _parts_to_text(parts)
+    return parts
+
+
+def _content_to_openai(content: Any) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+    """
+    把 Anthropic 的 content 转成 OpenAI 的 (content_parts, tool_calls, tool_results)
     - content 可能是 str，也可能是 list[block]
-    - block 类型: text / image / tool_use / tool_result
+    - block 类型: text / image / tool_use / tool_result / thinking
+    - content_parts 是 OpenAI 的 content part 列表，用 _parts_to_content 收敛后再用
     """
-    text_parts: List[str] = []
+    text_parts: List[Dict] = []
     tool_calls: List[Dict] = []
     tool_results: List[Dict] = []
 
     if content is None:
-        return "", tool_calls, tool_results
+        return text_parts, tool_calls, tool_results
 
     if isinstance(content, str):
-        return content, tool_calls, tool_results
+        if content:
+            text_parts.append({"type": "text", "text": content})
+        return text_parts, tool_calls, tool_results
 
     if isinstance(content, list):
         for block in content:
             if not isinstance(block, dict):
-                text_parts.append(str(block))
+                text_parts.append({"type": "text", "text": str(block)})
                 continue
 
             btype = block.get("type")
 
             if btype == "text":
-                text_parts.append(block.get("text", ""))
+                text_parts.append({"type": "text", "text": block.get("text", "")})
+
+            elif btype in ("thinking", "redacted_thinking"):
+                # 扩展思考块不回传给上游：原文塞进 prompt 会污染上下文，签名也不应外泄
+                continue
 
             elif btype == "image":
-                # Anthropic image -> OpenAI image_url (data url)
-                src = block.get("source", {})
+                # Anthropic image -> OpenAI image_url (data url / 远程 url)
+                src = block.get("source") or {}
                 if src.get("type") == "base64":
                     media = src.get("media_type", "image/png")
                     data = src.get("data", "")
-                    # 这里以多模态文本形式表达，交由上层决定是否走 vision 模型
-                    text_parts.append(
-                        f"\n[image: data:{media};base64,{data[:64]}...]\n"
-                    )
+                    if data:
+                        text_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": f"data:{media};base64,{data}"},
+                        })
                 elif src.get("type") == "url":
-                    text_parts.append(f"\n[image: {src.get('url')}]\n")
+                    url = src.get("url")
+                    if url:
+                        text_parts.append({
+                            "type": "image_url",
+                            "image_url": {"url": url},
+                        })
 
             elif btype == "tool_use":
                 try:
@@ -69,22 +107,27 @@ def _content_to_openai(content: Any) -> Tuple[str, List[Dict], List[Dict]]:
                 tr_content = block.get("content")
                 if isinstance(tr_content, list):
                     # 递归取出 text
-                    sub_text, _, _ = _content_to_openai(tr_content)
-                    tr_text = sub_text
+                    sub_parts, _, _ = _content_to_openai(tr_content)
+                    tr_text = _parts_to_text(sub_parts)
+                elif isinstance(tr_content, str):
+                    tr_text = tr_content
+                elif tr_content is None:
+                    tr_text = ""
                 else:
-                    tr_text = tr_content if isinstance(tr_content, str) else json.dumps(
-                        tr_content, ensure_ascii=False
-                    )
+                    tr_text = json.dumps(tr_content, ensure_ascii=False)
                 tool_results.append({
-                    "tool_call_id": block.get("tool_use_id", ""),
-                    "content": tr_text or "",
+                    "tool_call_id": block.get("tool_use_id", "") or "",
+                    "content": tr_text,
                 })
 
             else:
                 # 未知类型，原样塞进文本
-                text_parts.append(json.dumps(block, ensure_ascii=False))
+                text_parts.append({
+                    "type": "text",
+                    "text": json.dumps(block, ensure_ascii=False),
+                })
 
-    return "\n".join(p for p in text_parts if p), tool_calls, tool_results
+    return text_parts, tool_calls, tool_results
 
 
 def anthropic_to_openai_request(body: Dict[str, Any]) -> Dict[str, Any]:
@@ -97,45 +140,69 @@ def anthropic_to_openai_request(body: Dict[str, Any]) -> Dict[str, Any]:
     system = body.get("system")
     if system:
         if isinstance(system, list):
-            sys_text, _, _ = _content_to_openai(system)
+            sys_parts, _, _ = _content_to_openai(system)
+            sys_text = _parts_to_text(sys_parts)
         else:
             sys_text = str(system)
         if sys_text:
             openai_messages.append({"role": "system", "content": sys_text})
+
+    # 上一条 assistant 消息发出的 tool_call id（按顺序），
+    # 用于 Anthropic 侧 tool_result 没带 tool_use_id 时兜底
+    last_tool_call_ids: List[str] = []
 
     # 2) 逐条转换 messages
     for msg in body.get("messages", []) or []:
         role = msg.get("role", "user")
         content = msg.get("content")
 
-        text, tool_calls, tool_results = _content_to_openai(content)
+        parts, tool_calls, tool_results = _content_to_openai(content)
+        content_value = _parts_to_content(parts)
 
         # tool_result 必须单独成一条 role=tool 消息
-        for tr in tool_results:
+        for i, tr in enumerate(tool_results):
+            cid = tr["tool_call_id"]
+            if not cid and i < len(last_tool_call_ids):
+                # 缺 tool_use_id：按顺序回退到上一条 assistant 的 tool_call id
+                cid = last_tool_call_ids[i]
+            if not cid:
+                # 没有可匹配的 id，上游会 400，直接丢弃这条
+                print("警告: tool_result 无可用 tool_call_id，已跳过:", tr["content"][:80])
+                continue
             openai_messages.append({
                 "role": "tool",
-                "tool_call_id": tr["tool_call_id"],
+                "tool_call_id": cid,
                 "content": tr["content"],
             })
 
         if role == "assistant":
             assistant_msg: Dict[str, Any] = {
                 "role": "assistant",
-                "content": text or None,
+                "content": content_value or None,
             }
             if tool_calls:
                 assistant_msg["tool_calls"] = tool_calls
+                last_tool_call_ids = [tc["id"] for tc in tool_calls]
+            else:
+                last_tool_call_ids = []
             # 如果既没文本也没 tool_calls，跳过
             if assistant_msg["content"] or tool_calls:
                 openai_messages.append(assistant_msg)
         else:
             # user / 其他
-            if text:
-                openai_messages.append({"role": "user", "content": text})
+            last_tool_call_ids = []
+            if content_value:
+                openai_messages.append({"role": "user", "content": content_value})
 
     # 3) 参数映射
+    # model 必须由客户端指定：这里不能塞默认值，否则会把别的 provider 的模型名
+    # 发到当前上游端点，得到误导性的 404
+    model = body.get("model")
+    if not model or not str(model).strip():
+        raise ValueError("请求缺少 model 字段")
+
     openai_body: Dict[str, Any] = {
-        "model": body.get("model", "sensenova-6.8-flash-lite"),
+        "model": model,
         "messages": openai_messages,
     }
 
