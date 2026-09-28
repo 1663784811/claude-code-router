@@ -1,45 +1,18 @@
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from openai import (
-    AsyncOpenAI,
-    APIStatusError,
-    RateLimitError,
-    APITimeoutError,
-    APIConnectionError,
-    AuthenticationError,
-)
+from openai import AsyncOpenAI
 import traceback
 
 from handlers.util.OpenaiToAnthropic import openai_stream_to_anthropic, openai_to_anthropic
 from handlers.util.AnthropicToOpenai import anthropic_to_openai_request
+from handlers.util.ErrorMap import map_openai_exception
 
 client = AsyncOpenAI(
-    base_url="https://token.sensenova.cn/v1",
-    api_key="sk-AkBjsnJiWyZpixYdBjtQW9zAZFyNyq5h",
+    base_url="https://integrate.api.nvidia.com/v1",
+    api_key="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",
     max_retries=2,      # 429 时会自动指数退避重试 2 次
     timeout=120.0,
 )
-
-
-def _anthropic_error(status_code: int, err_type: str, message: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=status_code,
-        content={"type": "error", "error": {"type": err_type, "message": message}},
-    )
-
-
-def _map_openai_exception(e: Exception) -> JSONResponse:
-    if isinstance(e, RateLimitError):
-        return _anthropic_error(429, "rate_limit_error", f"上游限流(rpm exhausted): {e}")
-    if isinstance(e, AuthenticationError):
-        return _anthropic_error(401, "authentication_error", f"上游鉴权失败: {e}")
-    if isinstance(e, APITimeoutError):
-        return _anthropic_error(504, "timeout_error", f"上游超时: {e}")
-    if isinstance(e, APIConnectionError):
-        return _anthropic_error(502, "api_error", f"无法连接上游: {e}")
-    if isinstance(e, APIStatusError):
-        return _anthropic_error(e.status_code or 500, "api_error", f"上游错误: {e}")
-    return _anthropic_error(500, "api_error", f"代理异常: {e}")
 
 
 async def handle_messages(request: Request):
@@ -85,4 +58,4 @@ async def handle_messages(request: Request):
     except Exception as e:
         print("handle_messages 上游异常:", repr(e))
         traceback.print_exc()
-        return _map_openai_exception(e)
+        return map_openai_exception(e)
