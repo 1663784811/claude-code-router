@@ -1,0 +1,30 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8000",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "z-ai/glm-5.3",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "z-ai/glm-5.3",
+    "ANTHROPIC_MODEL": "z-ai/glm-5.3",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "z-ai/glm-5.3"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "mcp__codegraph__*"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true
+}

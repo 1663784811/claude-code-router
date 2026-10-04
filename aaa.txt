@@ -1,0 +1,30 @@
+{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "ANTHROPIC_BASE_URL": "https://api.deepseek.com/anthropic ",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_FABLE_MODEL_NAME": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL_NAME": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "deepseek-flash[1m]",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL_NAME": "deepseek-flash[1m]",
+    "ANTHROPIC_MODEL": "deepseek-flash[1m]",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "deepseek-flash"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Read(*)",
+      "Edit(*)",
+      "Write(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "WebFetch(*)",
+      "mcp__codegraph__*"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "skipDangerousModePermissionPrompt": true
+}

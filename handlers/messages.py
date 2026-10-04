@@ -8,8 +8,8 @@ from handlers.util.AnthropicToOpenai import anthropic_to_openai_request
 from handlers.util.ErrorMap import anthropic_error, map_openai_exception
 
 client = AsyncOpenAI(
-    base_url="https://integrate.api.nvidia.com/v1",
-    api_key="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",
+    base_url="",
+    api_key="",
     max_retries=2,      # 429 时会自动指数退避重试 2 次
     timeout=120.0,
 )
